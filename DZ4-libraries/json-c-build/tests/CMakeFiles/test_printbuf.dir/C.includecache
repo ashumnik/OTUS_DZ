@@ -1,0 +1,32 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/aleksey/OTUS/DZ4/json-c/debug.h
+stdlib.h
+-
+
+/home/aleksey/OTUS/DZ4/json-c/printbuf.h
+
+/home/aleksey/OTUS/DZ4/json-c/tests/test_printbuf.c
+assert.h
+-
+limits.h
+-
+stddef.h
+-
+stdio.h
+-
+stdlib.h
+-
+string.h
+-
+debug.h
+/home/aleksey/OTUS/DZ4/json-c/tests/debug.h
+printbuf.h
+/home/aleksey/OTUS/DZ4/json-c/tests/printbuf.h
+
