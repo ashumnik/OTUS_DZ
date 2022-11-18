@@ -21,11 +21,11 @@ $ make install
 
 ### Linking to libjson-c
 
-JSON_C_DIR=/path/to/json_c/install
-CFLAGS += -I$(JSON_C_DIR)/include/json-c
-LDFLAGS+= -L$(JSON_C_DIR)/lib -ljson-c
+JSON_C_DIR=/path/to/json_c/install <br />
+CFLAGS += -I$(JSON_C_DIR)/include/json-c <br />
+LDFLAGS+= -L$(JSON_C_DIR)/lib -ljson-c <br />
 
 ### build
 
-cd weather
+cd weather <br />
 make

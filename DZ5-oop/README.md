@@ -2,10 +2,10 @@
 
 ### build
 
-mkdir build
-cd build
-meson ..
-ninja
+mkdir build <br />
+cd build <br />
+meson .. <br />
+ninja <br />
 
 ### run
 
