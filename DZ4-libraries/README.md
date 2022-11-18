@@ -1,6 +1,6 @@
 # DZ4-libraries
 
-Для сборки программы weather требуется установка следующих библиотек
+To build the weather program, you need to install the following libraries
 
 ## libcurl
 
