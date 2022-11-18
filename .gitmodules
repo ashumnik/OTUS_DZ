@@ -1,0 +1,3 @@
+[submodule "DZ4-libraries/json-c"]
+	path = DZ4-libraries/json-c
+	url = https://github.com/json-c/json-c.git
