@@ -1,0 +1,245 @@
+diff --git a/net/ipv6/ip6_gre.c b/net/ipv6/ip6_gre.c
+index 09fa49b..1c00f76 100644
+--- a/net/ipv6/ip6_gre.c
++++ b/net/ipv6/ip6_gre.c
+@@ -58,6 +58,10 @@ static bool log_ecn_error = true;
+ module_param(log_ecn_error, bool, 0644);
+ MODULE_PARM_DESC(log_ecn_error, "Log packets received with corrupted ECN");
+ 
++static bool nbma_ipv6_fix = false;
++module_param(nbma_ipv6_fix, bool, 0644);
++MODULE_PARM_DESC(nbma_ipv6_fix, "Fixed IPv6 NBMA and duplicating headers (ashumnik)");
++
+ #define IP6_GRE_HASH_SIZE_SHIFT  5
+ #define IP6_GRE_HASH_SIZE (1 << IP6_GRE_HASH_SIZE_SHIFT)
+ 
+@@ -724,25 +728,23 @@ static netdev_tx_t __gre6_xmit(struct sk_buff *skb,
+ {
+ 	struct ip6_tnl *tunnel = netdev_priv(dev);
+ 	__be16 protocol;
++	__be16 flags;
+ 
+ 	if (dev->type == ARPHRD_ETHER)
+ 		IPCB(skb)->flags = 0;
+ 
+ 	if (dev->header_ops && dev->type == ARPHRD_IP6GRE)
+-		fl6->daddr = ((struct ipv6hdr *)skb->data)->daddr;
++		fl6->daddr = nbma_ipv6_fix ? ipv6_hdr(skb)->daddr : ((struct ipv6hdr *)skb->data)->daddr;
+ 	else
+ 		fl6->daddr = tunnel->parms.raddr;
+ 
+-	if (skb_cow_head(skb, dev->needed_headroom ?: tunnel->hlen))
+-		return -ENOMEM;
+-
+ 	/* Push GRE header. */
+ 	protocol = (dev->type == ARPHRD_ETHER) ? htons(ETH_P_TEB) : proto;
+ 
+ 	if (tunnel->parms.collect_md) {
+ 		struct ip_tunnel_info *tun_info;
+ 		const struct ip_tunnel_key *key;
+-		__be16 flags;
++		int tun_hlen;
+ 
+ 		tun_info = skb_tunnel_info_txcheck(skb);
+ 		if (IS_ERR(tun_info) ||
+@@ -755,25 +757,32 @@ static netdev_tx_t __gre6_xmit(struct sk_buff *skb,
+ 		fl6->daddr = key->u.ipv6.dst;
+ 		fl6->flowlabel = key->label;
+ 		fl6->flowi6_uid = sock_net_uid(dev_net(dev), NULL);
++		fl6->fl6_gre_key = tunnel_id_to_key32(key->tun_id);
+ 
+ 		dsfield = key->tos;
+ 		flags = key->tun_flags &
+ 			(TUNNEL_CSUM | TUNNEL_KEY | TUNNEL_SEQ);
+-		tunnel->tun_hlen = gre_calc_hlen(flags);
++		tun_hlen = gre_calc_hlen(flags);
+ 
+-		gre_build_header(skb, tunnel->tun_hlen,
++		if (skb_cow_head(skb, dev->needed_headroom ?: tun_hlen + tunnel->encap_hlen))
++			return -ENOMEM;
++
++		gre_build_header(skb, tun_hlen,
+ 				 flags, protocol,
+ 				 tunnel_id_to_key32(tun_info->key.tun_id),
+-				 (flags & TUNNEL_SEQ) ? htonl(tunnel->o_seqno++)
++				 (flags & TUNNEL_SEQ) ? htonl(atomic_fetch_inc(&tunnel->o_seqno))
+ 						      : 0);
+ 
+ 	} else {
+-		if (tunnel->parms.o_flags & TUNNEL_SEQ)
+-			tunnel->o_seqno++;
++		if (skb_cow_head(skb, dev->needed_headroom ?: tunnel->hlen))
++			return -ENOMEM;
++
++		flags = tunnel->parms.o_flags;
+ 
+-		gre_build_header(skb, tunnel->tun_hlen, tunnel->parms.o_flags,
++		gre_build_header(skb, tunnel->tun_hlen, flags,
+ 				 protocol, tunnel->parms.o_key,
+-				 htonl(tunnel->o_seqno));
++				 (flags & TUNNEL_SEQ) ? htonl(atomic_fetch_inc(&tunnel->o_seqno))
++						      : 0);
+ 	}
+ 
+ 	return ip6_tnl_xmit(skb, dev, dsfield, fl6, encap_limit, pmtu,
+@@ -896,8 +905,26 @@ static netdev_tx_t ip6gre_tunnel_xmit(struct sk_buff *skb,
+ 	if (!pskb_inet_may_pull(skb))
+ 		goto tx_err;
+ 
+-	if (!ip6_tnl_xmit_ctl(t, &t->parms.laddr, &t->parms.raddr))
+-		goto tx_err;
++	/* Pull skb to avoid duplication of
++	* ipv6 header and gre header (ashumnik)
++	*/
++	if (nbma_ipv6_fix && dev->header_ops) {
++		const struct ipv6hdr *ipv6h = (const struct ipv6hdr *)skb->data;
++		const int pull_len = t->hlen + sizeof(struct ipv6hdr);
++		
++		if (!ip6_tnl_xmit_ctl(t, &ipv6h->saddr, &ipv6h->daddr))
++			goto tx_err;
++
++		if (skb_cow_head(skb, 0))
++			goto tx_err;
++
++		skb_reset_network_header(skb);
++		skb_pull(skb, pull_len);
++		skb_reset_mac_header(skb);
++	} else {
++		if (!ip6_tnl_xmit_ctl(t, &t->parms.laddr, &t->parms.raddr))
++			goto tx_err;
++	}
+ 
+ 	switch (skb->protocol) {
+ 	case htons(ETH_P_IP):
+@@ -939,7 +966,6 @@ static netdev_tx_t ip6erspan_tunnel_xmit(struct sk_buff *skb,
+ 	__be16 proto;
+ 	__u32 mtu;
+ 	int nhoff;
+-	int thoff;
+ 
+ 	if (!pskb_inet_may_pull(skb))
+ 		goto tx_err;
+@@ -960,10 +986,16 @@ static netdev_tx_t ip6erspan_tunnel_xmit(struct sk_buff *skb,
+ 	    (ntohs(ip_hdr(skb)->tot_len) > skb->len - nhoff))
+ 		truncate = true;
+ 
+-	thoff = skb_transport_header(skb) - skb_mac_header(skb);
+-	if (skb->protocol == htons(ETH_P_IPV6) &&
+-	    (ntohs(ipv6_hdr(skb)->payload_len) > skb->len - thoff))
+-		truncate = true;
++	if (skb->protocol == htons(ETH_P_IPV6)) {
++		int thoff;
++
++		if (skb_transport_header_was_set(skb))
++			thoff = skb_transport_header(skb) - skb_mac_header(skb);
++		else
++			thoff = nhoff + sizeof(struct ipv6hdr);
++		if (ntohs(ipv6_hdr(skb)->payload_len) > skb->len - thoff)
++			truncate = true;
++	}
+ 
+ 	if (skb_cow_head(skb, dev->needed_headroom ?: t->hlen))
+ 		goto tx_err;
+@@ -990,6 +1022,7 @@ static netdev_tx_t ip6erspan_tunnel_xmit(struct sk_buff *skb,
+ 		fl6.daddr = key->u.ipv6.dst;
+ 		fl6.flowlabel = key->label;
+ 		fl6.flowi6_uid = sock_net_uid(dev_net(dev), NULL);
++		fl6.fl6_gre_key = tunnel_id_to_key32(key->tun_id);
+ 
+ 		dsfield = key->tos;
+ 		if (!(tun_info->key.tun_flags & TUNNEL_ERSPAN_OPT))
+@@ -1050,7 +1083,7 @@ static netdev_tx_t ip6erspan_tunnel_xmit(struct sk_buff *skb,
+ 	/* Push GRE header. */
+ 	proto = (t->parms.erspan_ver == 1) ? htons(ETH_P_ERSPAN)
+ 					   : htons(ETH_P_ERSPAN2);
+-	gre_build_header(skb, 8, TUNNEL_SEQ, proto, 0, htonl(t->o_seqno++));
++	gre_build_header(skb, 8, TUNNEL_SEQ, proto, 0, htonl(atomic_fetch_inc(&t->o_seqno)));
+ 
+ 	/* TooBig packet may have updated dst->dev's mtu */
+ 	if (!t->parms.collect_md && dst && dst_mtu(dst) > dst->dev->mtu)
+@@ -1098,6 +1131,7 @@ static void ip6gre_tnl_link_config_common(struct ip6_tnl *t)
+ 	fl6->flowi6_oif = p->link;
+ 	fl6->flowlabel = 0;
+ 	fl6->flowi6_proto = IPPROTO_GRE;
++	fl6->fl6_gre_key = t->parms.o_key;
+ 
+ 	if (!(p->flags&IP6_TNL_F_USE_ORIG_TCLASS))
+ 		fl6->flowlabel |= IPV6_TCLASS_MASK & p->flowinfo;
+@@ -1362,6 +1396,7 @@ static int ip6gre_header(struct sk_buff *skb, struct net_device *dev,
+ 	struct ip6_tnl *t = netdev_priv(dev);
+ 	struct ipv6hdr *ipv6h;
+ 	__be16 *p;
++	int rval = nbma_ipv6_fix ? (t->hlen + sizeof(*ipv6h)) : t->hlen;
+ 
+ 	ipv6h = skb_push(skb, t->hlen + sizeof(*ipv6h));
+ 	ip6_flow_hdr(ipv6h, 0, ip6_make_flowlabel(dev_net(dev), skb,
+@@ -1385,15 +1420,34 @@ static int ip6gre_header(struct sk_buff *skb, struct net_device *dev,
+ 	if (daddr)
+ 		memcpy(&ipv6h->daddr, daddr, sizeof(struct in6_addr));
+ 	if (!ipv6_addr_any(&ipv6h->daddr))
+-		return t->hlen;
++		return rval;
++
++	return -rval;
++}
+ 
+-	return -t->hlen;
++static int ip6gre_header_parse(const struct sk_buff *skb, unsigned char
++*haddr)
++{
++	const struct ipv6hdr *ipv6h;
++    ipv6h = (const struct ipv6hdr *)(skb_mac_header(skb) + sizeof(struct ethhdr));
++	
++	if (ipv6h->version != 6) {
++		return 0;
++	}
++	
++	memcpy(haddr, &ipv6h->saddr, sizeof(struct in6_addr));
++	return sizeof(struct in6_addr);
+ }
+ 
+ static const struct header_ops ip6gre_header_ops = {
+ 	.create	= ip6gre_header,
+ };
+ 
++static const struct header_ops ip6gre_header_ops_ashum = {
++	.create	= ip6gre_header,
++    .parse  = ip6gre_header_parse,
++};
++
+ static const struct net_device_ops ip6gre_netdev_ops = {
+ 	.ndo_init		= ip6gre_tunnel_init,
+ 	.ndo_uninit		= ip6gre_tunnel_uninit,
+@@ -1524,7 +1578,7 @@ static int ip6gre_tunnel_init(struct net_device *dev)
+ 	memcpy(dev->broadcast, &tunnel->parms.raddr, sizeof(struct in6_addr));
+ 
+ 	if (ipv6_addr_any(&tunnel->parms.raddr))
+-		dev->header_ops = &ip6gre_header_ops;
++		dev->header_ops = nbma_ipv6_fix ? &ip6gre_header_ops_ashum : &ip6gre_header_ops;
+ 
+ 	return 0;
+ }
+@@ -1543,7 +1597,7 @@ static void ip6gre_fb_tunnel_init(struct net_device *dev)
+ static struct inet6_protocol ip6gre_protocol __read_mostly = {
+ 	.handler     = gre_rcv,
+ 	.err_handler = ip6gre_err,
+-	.flags       = INET6_PROTO_NOPOLICY|INET6_PROTO_FINAL,
++	.flags       = INET6_PROTO_FINAL,
+ };
+ 
+ static void ip6gre_destroy_tunnels(struct net *net, struct list_head *head)
+diff --git a/net/ipv6/ip6_tunnel.c b/net/ipv6/ip6_tunnel.c
+index 08441f0..cad72b9 100644
+--- a/net/ipv6/ip6_tunnel.c
++++ b/net/ipv6/ip6_tunnel.c
+@@ -1128,8 +1128,8 @@ int ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev, __u8 dsfield,
+ 		hop_limit = t->parms.hop_limit;
+ 	}
+ 
+-	/* NBMA tunnel */
+-	if (ipv6_addr_any(&t->parms.raddr)) {
++	/* ashumnik: added (proto != NEXTHDR_GRE)*/
++	if ((proto != NEXTHDR_GRE) && ipv6_addr_any(&t->parms.raddr)) {
+ 		if (skb->protocol == htons(ETH_P_IPV6)) {
+ 			struct in6_addr *addr6;
+ 			struct neighbour *neigh;
