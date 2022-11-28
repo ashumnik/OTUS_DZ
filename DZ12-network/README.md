@@ -2,9 +2,9 @@
 
 ## build
 
-mkdir build <\br>
-cd build <\br>
-cmake .. <\br>
+mkdir build <br />
+cd build <br />
+cmake .. <br />
 
 ## run
 

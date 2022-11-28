@@ -2,13 +2,13 @@
 
 ## Tetris
 
-For the application to work, you need to install: <\br>
+For the application to work, you need to install: <br />
 * wine
 * libsdl2-dev
 
 ## build
 
-cd Tetris
+cd Tetris <br />
 make
 
 ## run
