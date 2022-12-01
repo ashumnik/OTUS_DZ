@@ -8,21 +8,27 @@
 
 int NUM_WORDS = 0;
 
-unsigned hash_str(const char* s, int *size)
+size_t get_char_code(char c) 
 {
-	const int p = 3;
-	long long hash = 0, p_pow = 1;
-	int len = strlen(s);
-	int retw;
-	
-	for (int i = 0; i < len; ++i)
+    if ('a' <= c && c <= 'z') return c - 'a' + 1;
+	else if ('A' <= c && c <= 'Z') return c - 'A' + 27;
+	else return 53;
+}
+
+size_t hash_str(const char* word, int *size) 
+{
+    const size_t len = strlen(word);
+    size_t result = 0;
+    size_t p = 1;
+    for (size_t i = 0; i < len; ++i) 
 	{
-		hash += (s[i] - 'a' + 1) * p_pow;
-		p_pow *= p;
-	}
-	retw = hash % *size;
-	
-	return retw < 0 ? -retw : retw;
+        char cur_c = word[i];
+        p *= hash_key;
+        p %= *size;
+        result += p * get_char_code(cur_c);
+        result %= *size;
+    }
+    return result;
 }
 
 struct DataItem *words_num_count(FILE *fp, struct DataItem *hasht, int *size)
@@ -36,7 +42,7 @@ struct DataItem *words_num_count(FILE *fp, struct DataItem *hasht, int *size)
 		token = strtok(buf, t);
 		
 		while(token != NULL) {
-			hasht = add_or_inc_item(hasht, token, size);
+			hasht = add_or_inc_item(hasht, token, size, 1);
 			token = strtok(NULL, t);
 		}
 	}
@@ -46,12 +52,18 @@ struct DataItem *words_num_count(FILE *fp, struct DataItem *hasht, int *size)
 
 struct DataItem *rehashing(struct DataItem *hasht_from, int *size)
 {
-	int new_size = *size * 2;
+	int new_size = *size + INC_SIZE;
 	NUM_WORDS = 0;
 	struct DataItem *hasht_to = calloc(new_size, sizeof(struct DataItem));
+	if (hasht_to == NULL)
+	{
+		printf("Memory allocation error\n");
+        exit(1);
+	}
+	
 	for (int i = 0; i < *size; ++i) {
 		if (hasht_from[i].data != 0) {
-			add_or_inc_item(hasht_to, (char*)hasht_from[i].key, &new_size);
+			add_or_inc_item(hasht_to, (char*)hasht_from[i].key, &new_size, hasht_from[i].data);
 		}
 	}
 	free(hasht_from);
@@ -59,7 +71,7 @@ struct DataItem *rehashing(struct DataItem *hasht_from, int *size)
 	return hasht_to;
 }
 
-struct DataItem *add_or_inc_item(struct DataItem *hasht, char *word, int *size)
+struct DataItem *add_or_inc_item(struct DataItem *hasht, char *word, int *size, int data)
 {
 	int n = 0;	
 	n = hash_str(word, size);
@@ -78,7 +90,7 @@ struct DataItem *add_or_inc_item(struct DataItem *hasht, char *word, int *size)
 			
 			if (!hasht[n].data) 
 			{
-				add_item(&hasht[n], word);
+				add_item(&hasht[n], word, data);
 				++NUM_WORDS;
 			} 
 			else
@@ -89,7 +101,7 @@ struct DataItem *add_or_inc_item(struct DataItem *hasht, char *word, int *size)
 	}
 	else
 	{
-		add_item(&hasht[n], word);
+		add_item(&hasht[n], word, data);
 		++NUM_WORDS;
 	}
 	
@@ -100,9 +112,9 @@ struct DataItem *add_or_inc_item(struct DataItem *hasht, char *word, int *size)
 	return hasht;
 }
 
-void add_item(struct DataItem *item, char *word) 
+void add_item(struct DataItem *item, char *word, int data) 
 {
-	item->data = 1;
+	item->data = data;
 	memcpy(item->key, word, WSIZE);
 }
 
