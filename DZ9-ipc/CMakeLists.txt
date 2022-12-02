@@ -9,6 +9,3 @@ set(MYDAEMON_SRC
 add_executable(MonitoringDaemon MyDaemon.c ${MYDAEMON_SRC})
 
 add_executable(TestClient TestClient.c)
-add_executable(Server Server.c)
-
-include(InstallDaemon.cmake)

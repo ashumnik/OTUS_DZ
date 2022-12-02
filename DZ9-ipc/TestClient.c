@@ -8,10 +8,24 @@
 
 int main(int argc, char** argv) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	
     if (fd < 0) {
         perror("Failed to create a socket");
         return errno;
     }
+	
+	char kSocketPath[MAX_BUFF_SIZE];
+	char *filename = CONF_FILENAME;
+	FILE *fp = fopen(filename,"r");
+	
+	if (fp == NULL)
+    {
+        printf("Error: could not open file %s\n", filename);
+        return 1;
+    }
+
+    fgets(kSocketPath, MAX_BUFF_SIZE, fp);
+    fclose(fp);
 
     struct sockaddr_un addr;
     addr.sun_family = AF_UNIX;
@@ -28,30 +42,30 @@ int main(int argc, char** argv) {
     printf("Successfully connected to server.\n");
 
     char buffer[MAX_MSG_LENGTH];
-
     file_size_t sample_file_size = 0;
 
-    do {
-        memcpy(buffer, (void*)&sample_file_size, sizeof(file_size_t));
-        int length = sizeof(file_size_t);
-        int bytes_sent = send(fd, buffer, length, 0);
+	int bytes_received = recv(fd, buffer, sizeof(buffer), 0);
+	if (bytes_received < 0) {
+		close(fd);
+		perror("Failed to receive the message from client");
+		return errno;
+	}
 
-        if (bytes_sent < 0) {
-            close(fd);
-            perror("Failed to send message to server");
-            return errno;
-        }
+	if (bytes_received == 0) {
+		printf("Connection to client was closed.\n");
+	}
 
-        if (bytes_sent != length) {
-            fprintf(stderr, "Last message wasn't sent completely. Disconnecting...\n");
-            break;
-        }
-        printf("Successfully sent %d bytes to server.\n", length);
+	int bytes_read = 0;
+	while (bytes_read < bytes_received) {
+		if (bytes_read + (int)sizeof(ssize_t) > bytes_received) {
+			fprintf(stderr, "Received message in incorrect format.\n");
+			return 1;
+		}
 
-        ++sample_file_size;
-
-        sleep(10);
-    } while (1);
+		const ssize_t* file_size = (const ssize_t*)&buffer[bytes_read];
+		printf("File size = %ld bytes.\n", *file_size);
+		bytes_read += sizeof(file_size_t);
+	}
 
     close(fd);
     return 0;

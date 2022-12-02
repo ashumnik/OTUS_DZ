@@ -2,8 +2,8 @@
 #define _COMMONDATA_H
 
 #define MAX_MSG_LENGTH 256
-
-static const char* kSocketPath = "/tmp/mydaemon_socket";
+#define CONF_FILENAME "../my-daemon.conf"
+#define MAX_BUFF_SIZE 256
 
 typedef long long file_size_t;
 
