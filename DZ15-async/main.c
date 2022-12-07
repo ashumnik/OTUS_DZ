@@ -1,4 +1,7 @@
 #include <GL/glew.h>
+#include <GL/freeglut.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #ifdef __APPLE__
 #include <GLUT/glut.h>
@@ -9,15 +12,29 @@
 int window_width = 700;
 int window_height = 700;
 int fps = 30;
+int mps = 30;
 
-void reshape(const int width, const int height) {
+void reshape(int width, int height) {
     glEnable(GL_DEPTH_TEST);
+	
+	if (height == 0) 
+		height = 1;
+	GLfloat aspect_ratio = (GLfloat)height / (GLfloat)width;
 
-    glViewport(0, 0, width, height);
+	glViewport(0, 0, width, height);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(-1, 1, -1, 1, 0, 10);
 
+    if(aspect_ratio >= 1.0)
+    {
+        glOrtho(-1, 1, -1 * aspect_ratio, aspect_ratio, -1, 1);
+    }
+    else
+    {
+        glOrtho(-1 / aspect_ratio, 1 / aspect_ratio, -1, 1, -1, 1);
+    }
+	
+	glMatrixMode(GL_MODELVIEW);
     window_width = width;
     window_height = height;
 }
@@ -88,9 +105,14 @@ void draw() {
     glutSwapBuffers();
 }
 
-void timer() {
+// void timer() {
+    // glutPostRedisplay();
+    // glutTimerFunc(1000 / fps, timer, 0);
+// }
+
+void idle() {
+	usleep(1000000 / mps);
     glutPostRedisplay();
-    glutTimerFunc(1000 / fps, timer, 0);
 }
 
 int main(int argc, char** argv) {
@@ -98,12 +120,13 @@ int main(int argc, char** argv) {
     glutInitWindowSize(window_width, window_height);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
     glutCreateWindow("3D Cube");
-
+	glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS);
+	
     glutReshapeFunc(reshape);
     glutDisplayFunc(draw);
-    glutTimerFunc(1000 / fps, timer, 0);
+	// glutTimerFunc(1000 / fps, timer, 0);
+	glutIdleFunc(idle); 
     glClearColor(0, 0, 0, 0);
-
     glutMainLoop();
 
     return 0;
