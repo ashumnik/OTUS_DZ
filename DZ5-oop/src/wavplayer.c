@@ -244,6 +244,7 @@ static gboolean _wavplayer_open(GstAudioSrc *src)
     return TRUE;
 error_exit:
     GST_ELEMENT_ERROR(src, RESOURCE, READ, (NULL), GST_ERROR_SYSTEM);
+	g_close(wavplayer->input, NULL);
     return FALSE;
 }
 
@@ -291,8 +292,11 @@ static guint _wavplayer_read(GstAudioSrc *src, gpointer data, guint length,
     while (ret < length) 
 	{
         delta += read(wavplayer->input, data, length - ret);
-        if (delta == 0) 
-            break;
+        if (delta == 0)
+		{
+			kill(getpid(), SIGINT);
+			break;
+		}
         ret += delta;
     }
 
@@ -339,7 +343,7 @@ static gboolean plugin_init(GstPlugin *plugin)
 #define PACKAGE_NAME "wavplayer"
 #endif
 #ifndef GST_PACKAGE_ORIGIN
-#define GST_PACKAGE_ORIGIN "https://github.com/ashumnik/OTUS-C/DZ5"
+#define GST_PACKAGE_ORIGIN "https://github.com/ashumnik/OTUS_DZ/tree/main/DZ5-oop"
 #endif
 
 GST_PLUGIN_DEFINE(GST_VERSION_MAJOR, GST_VERSION_MINOR, wavplayer,
